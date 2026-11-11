@@ -1,0 +1,220 @@
+# 📋 HPE SimpliVity 叢集（4 節點）關機與開機完整作業程序（外部獨立 Arbiter 實戰版）
+
+> 本文件為機房維護、停復電保養與重大事件切換時之標準作業程序（SOP）。針對採用**外部獨立實體主機作為 Arbiter 與 DC** 之 4 節點 HPE SimpliVity 叢集環境編寫。
+
+---
+
+## 🔑 常用預設帳號與前置環境載入提醒
+- **OVC 登入帳號**：`svtcli`（強烈建議使用此本機管理帳號，避免 vCenter 與外部 AD 關機後無法驗證）。
+- **載入底層指令環境**：登入 OVC 後，凡是遇到需要執行 `dsv-*` 或 `systemctl` 指令時，請先執行以下兩行切換為 root 並載入環境變數：
+  ```bash
+  sudo su
+  source /var/tmp/build/bin/appsetup
+  ```
+
+---
+
+## 🛑 一、 完整關機程序（Graceful Shutdown）
+
+### 步驟 1：確認叢集健康狀態與記錄重要主機位置
+SSH 登入任一台 OVC，執行以下指令確認叢集、儲存同步與備份任務狀態：
+1. **檢查節點與仲裁（Arbiter）連線**：
+   ```bash
+   svt-federation-show
+   ```
+   *(確認標準：4 個節點 State 皆為 Alive、Status 為 Healthy，且外部 Arbiter 為 Connected)*
+2. **檢查是否有未完成同步（違反 HA）的 VM**：
+   ```bash
+   svt-vm-show --violations
+   ```
+   *(確認標準：無列出任何異常 VM；若有 Synchronizing 狀態，請等待同步完成)*
+3. **檢查是否有進行中的備份或遷移任務**：
+   ```bash
+   svt-task-show
+   ```
+   *(確認標準：無進行中之任務)*
+4. **檢查硬體狀態**：
+   ```bash
+   svt-hardware-show
+   ```
+5. **記錄重要管理元件位置（供開機時定位使用）**：
+   - vCenter (VCSA) 所在 SimpliVity ESXi IP：______________________
+   - 外部獨立實體主機（DC / Arbiter） IP / 管理介面：______________________
+6. *(建議)* 於 vCenter 叢集設定中，暫時取消勾選 vSphere HA（避免關機時觸發主機隔離反應）。
+
+---
+
+### 步驟 2：關閉 SimpliVity 叢集內的所有業務虛擬機器（Guest OS）
+1. 於 vCenter 中，依業務相依性（由前端 Web ➔ 應用 AP ➔ 資料庫 DB ➔ 叢集內基礎服務）正常關閉所有業務 VM（Shut Down Guest OS）。
+2. 確認 SimpliVity 叢集畫面上除了 vCenter 以及 4 台 OVC 之外，其餘所有 VM 皆已呈現已關機（Powered Off）狀態。
+3. *(⚠️ 注意：位於外部實體機上的 DC 與 Arbiter 此時保持開機運行，切勿關閉！)*
+
+---
+
+### 步驟 3：關閉 vCenter Server (VCSA)
+1. 透過 vCenter VAMI 管理後台（`https://<vCenter_IP>:5480`）或直接從其所在的 ESXi Host Client（`https://<ESXi_IP>/ui`），將 vCenter Server (VCSA) 正常關機。
+2. *(選用驗證)* 可 SSH 登入各台 SimpliVity ESXi 確認目前叢集內僅剩 OVC 仍在運行：
+   ```bash
+   esxcli vm process list
+   ```
+
+---
+
+### 步驟 4：安全關閉 4 台節點的 OVC（OmniStack Virtual Controller）
+> ⚠️ **嚴禁直接在 ESXi 介面按 Power Off 強制斷電**，否則會造成重複資料刪除索引（Metadata）損毀！  
+> *(此時因為外部 Arbiter 仍在線上，OVC 在停止服務時能保持完整的仲裁連線，關機過程會更安全順暢)*
+
+請分別透過 SSH（以 `svtcli` 帳號）或 ESXi Host Client Console 登入 4 台 OVC，擇一執行以下安全關機指令：
+
+#### 【作法 A：透過底層服務優雅停止後關機（最穩健、推薦）】
+```bash
+# 1. 切換為 root 並載入環境變數
+sudo su
+source /var/tmp/build/bin/appsetup
+
+# 2. 優雅停止 SimpliVity 檔案系統服務 (確保記憶體資料寫入硬碟)
+systemctl stop svtfs@0
+# (註：若為舊版 OmniStack 3.7.x 則輸入：stop svtfs)
+
+# 3. 確認 svtfs 服務已完全停止 
+tail -f $SVTLOG
+# 👉 如果 Log 不再有輸出，並且有看到 HAL has been stopped 字樣，代表服務停止 (按 Ctrl+C 離開)
+
+# 4. 執行安全關機斷電
+sudo shutdown -P now
+```
+
+#### 【作法 B：使用 SimpliVity 內建安全關機指令】
+```bash
+# 因 vCenter 已關機，需加上 --emergency 參數並輸入 svtcli 密碼
+svt-shutdown-safe --emergency
+
+# 檢查關機進度
+svt-shutdown-status
+```
+*(註：在全部執行完畢後，請至 4 台 ESXi Host Client 網頁介面，確認 4 台 OVC 皆已變為 Powered Off 狀態。)*
+
+---
+
+### 步驟 5：關閉 4 台 SimpliVity ESXi 實體主機
+可透過各節點 ESXi Host Client 網頁介面 (`https://<esxi_ip>/ui`) 點選「Enter Maintenance Mode」再點選「Shut Down」；或直接透過 ESXi SSH 執行以下指令：
+```bash
+# 1. 將 ESXi 切換至維護模式
+esxcli system maintenanceMode set --enable true
+
+# 2. 確認已進入維護模式 (應顯示 Enabled)
+esxcli system maintenanceMode get
+
+# 3. 正常關閉 ESXi 實體主機
+esxcli system shutdown poweroff --reason="Planned Power Maintenance"
+```
+
+---
+
+### 步驟 6：關閉 HPE StoreOnce 與外部獨立主機（Arbiter 最後關機）
+1. **關閉 StoreOnce**：登入 HPE StoreOnce Management Console 網頁管理介面，前往 System / Hardware（或 Power Actions 選單），點選 Shut Down System。
+2. **關閉外部 Arbiter / DC 主機（最後關機）**：
+   - 確認 4 台 SimpliVity 實體主機皆已完全斷電後，登入該台外部獨立實體主機。
+   - 若 Arbiter 是該實體機上的獨立 VM，請先將 Arbiter VM 與 DC VM 正常關機，再關閉該實體主機電源；若 Arbiter 直接安裝於該實體 Windows DC OS 內，直接將該台 Windows 伺服器正常關機即可。
+3. 等待所有設備前面板電源指示燈熄滅（轉為待機燈號），即可進行機房斷電維護。
+
+---
+
+## 🚀 二、 完整開機程序（Power-On Procedure）
+
+### 步驟 1：開啟網路交換器、外部獨立主機（Arbiter 最早開）與 StoreOnce
+1. **開啟網路設備**：確認機房核心交換器、管理網路交換器與 10GbE/25GbE 儲存專用交換器 皆已完全開機且 Port 燈號正常。
+2. **開啟外部獨立主機（DC 與 Arbiter 最早開機）**：
+   - 按下外部獨立實體主機電源鈕開機，確保 AD/DNS 服務 與 Arbiter 率先啟動就緒。
+   - **確認 Arbiter 服務狀態**：登入 Arbiter 所在系統，確認 HPE SimpliVity Arbiter 服務（Windows Service 或 Linux 服務）已顯示為 Running（正在執行），且網路可正常 Ping 通。
+3. **開啟 StoreOnce**：按下 HPE StoreOnce 實體電源按鈕開機，等待 5～10 分鐘，確認其系統與 Catalyst 儲存服務完全就緒。
+
+---
+
+### 步驟 2：開啟 4 台 SimpliVity ESXi 實體伺服器並「退出維護模式」
+1. 透過 HPE iLO 介面或實體面板電源鈕，依序開啟 4 台 SimpliVity ESXi 實體主機。
+2. 等待約 5～10 分鐘，直到可登入 4 台 ESXi Host Client (`https://<esxi_ip>/ui`) 或連上 SSH。
+3. **【關鍵動作】將 4 台 ESXi 退出維護模式**（若未退出，OVC 與後續 VM 將無法啟動）：
+   - 網頁操作：於 ESXi Host Client 點選 Exit Maintenance Mode。
+   - ESXi SSH 指令操作：
+     ```bash
+     # 退出維護模式
+     esxcli system maintenanceMode set --enable false
+
+     # 確認狀態已恢復為 Disabled
+     esxcli system maintenanceMode get
+     ```
+
+---
+
+### 步驟 3：啟動 4 台 OVC 並等待底層儲存池同步就緒
+> ⚠️ **此為開機最核心步驟！** 因為外部 Arbiter 已經在步驟 1 提早開好等待了，此時 4 台 OVC 開機後會直接連上 Arbiter 取得仲裁並快速掛載儲存池。在確認 OVC 儲存池恢復 Healthy 前，請勿急於啟動 vCenter。
+
+1. 於 4 台 ESXi Host Client 檢查 OVC 是否已自動開機；若未啟動，請手動將 4 台 OVC 點選 Power On。
+2. 耐心等待 10～15 分鐘，讓 4 台 OVC 完成系統引導、連上外部 Arbiter 並建立分散式儲存鏡像。
+3. SSH 登入任一台 OVC（使用 `svtcli` 帳號），依序執行以下指令驗證儲存層是否就緒：
+   ```bash
+   # 1. 切換為 root 並載入環境變數
+   sudo su
+   source /var/tmp/build/bin/appsetup
+
+   # 2. 檢查 SimpliVity 核心檔案系統服務是否已啟動 (應顯示 active / running)
+   systemctl status svtfs@0
+
+   # 3. 檢查 OmniStack 軟體堆疊健康度
+   svt-software-status-show
+
+   # 4. 檢查 4 個節點聯邦與 Arbiter 狀態 (因 vCenter 尚未開機，需加 --emergency)
+   svt-federation-show --emergency
+   # 👉 確認標準：4 個節點 State 皆顯示為 Alive，且因為外部 Arbiter 已提早開機，此處應直接顯示為 Connected！
+
+   # 5. 檢查分散式儲存池連線與容量平衡狀態
+   dsv-balance-show --shownodeip
+   dsv-balance-show --status
+   # 👉 確認標準：4 個節點皆正常列出 IP 與容量數據，無報錯訊息
+   ```
+4. **回頭確認 ESXi Datastore 掛載狀態**：
+   於 ESXi Host Client 確認 SimpliVity Datastore 已恢復正常顯示（不再是灰底 Inaccessible），或於 ESXi SSH 執行指令確認：
+   ```bash
+   # 確認 NFS Datastore 的 Mounted 欄位為 true
+   esxcli storage nfs list
+   ```
+
+---
+
+### 步驟 4：啟動 vCenter Server (VCSA)
+1. 根據關機【步驟 1】記錄的 ESXi 主機 IP，登入存放 vCenter (VCSA) 的 ESXi Host Client，將 vCenter 點選 Power On。
+2. *(註：由於外部 DC/DNS 已於步驟 1 啟動，vCenter 開機時將能順利解析 DNS 與進行 AD 驗證)*
+3. 等待約 5～10 分鐘，讓 vCenter 內部所有服務與 SimpliVity vSphere Plugin 載入完成。
+
+---
+
+### 步驟 5：驗證 SimpliVity 叢集與外部儲存最終狀態
+1. 透過 OVC SSH 執行最終總體檢指令（此時 vCenter 已開機，直接執行即可，無須加 `--emergency`）：
+   ```bash
+   # 1. 驗證叢集、節點與 Arbiter 狀態
+   svt-federation-show
+   # 👉 確認標準：4 台節點皆為 Alive / Healthy，且 Arbiter 顯示為 Connected！
+
+   # 2. 驗證外部 StoreOnce 備份設備連線狀態
+   svt-external-store-show
+   # 👉 確認標準：StoreOnce 狀態顯示為 Connected / Online
+
+   # 3. 驗證所有 VM 的儲存 HA 狀態是否正常
+   svt-vm-show --violations
+   # 👉 確認標準：無異常項目（若有少數正在自動同步，等待其變回 Green 即可）
+   ```
+2. **透過 vCenter 網頁介面驗證**：
+   - 登入 vCenter，前往 HPE SimpliVity Federation 面板，確認所有指示燈皆為綠色正常（Normal/Healthy）。
+   - 若關機前有停用 vSphere HA，請於此時重新勾選啟用。
+
+---
+
+### 步驟 6：依序啟動業務虛擬機器
+1. 於 vCenter 中，按照業務相依性順序分批啟動所有業務 VM：
+   **① 叢集內基礎設施（若有次要 AD / DNS） ➔ ② 資料庫（DB） ➔ ③ 應用程式伺服器（AP） ➔ ④ 網頁與前端服務（Web）**。
+2. 通知相關單位進行系統連線測試，完成本次停復電維護作業。
+
+---
+*文件更新時間：2026 年 11 月*  
+*歸檔分類：HPE SimpliVity 機房維運 SOP*
