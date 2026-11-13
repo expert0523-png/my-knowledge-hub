@@ -11,6 +11,7 @@
 | [🚀 umbrelOS 完整指南：ASUS UX32L 實戰版](topics/umbrelos-asus-ux32l-guide.md) | 家用伺服器 | 舊筆電活化為個人雲端家庭伺服器之安裝、BIOS、必備設定與 App 推薦 |
 | [📋 HPE SimpliVity 叢集關開機 SOP](topics/hpe-simplivity-4node-shutdown-startup-sop.md) | 企業機房維運 | 4 節點 + 外部獨立 Arbiter/DC 環境之停復電安全關機與依序開機標準程序 |
 | [🪟 Windows 11 KB5132061 與資安維運筆記](topics/windows-11-2026-11-kb5132061-ops-notes.md) | 系統與資安更新 | 2026年11月更新、SMBv1/NTLM 斷線急救、已知 5 大災情、跳過更新技巧與同月資安清單 |
+| [🚀 Google Gemini 4 與 Decision 1 全解析報告](topics/google-gemini-4-and-decision-1-deep-dive.md) | AI 前沿與架構 | Gemini 4 化學元素命名、Hydrogen/Argon/Carbon 規格與非生成式 Decision 1 實戰架構 |
 
 ---
 
