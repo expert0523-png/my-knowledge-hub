@@ -21,17 +21,47 @@ aliases:
 
 ---
 
-## 一、 為什麼要從 Snap 換成官方獨立版？
+## 一、 Snap 版 vs. 官方獨立安裝版：詳細優缺點分析
 
-| 比較項目 | Snap 版 (`/snap/antigravity-cli/...`) | 官方獨立版 (`~/.local/bin/agy`) |
+### 1. 總覽對照表
+
+| 比較維度 | Snap 版 (`/snap/antigravity-cli/...`) | 官方獨立安裝版 (`~/.local/bin/agy`) |
 | :--- | :--- | :--- |
-| **檔案系統權限** | 掛載於唯讀的 SquashFS，無法直接修改執行檔 | 位於個人家目錄下，擁有完整讀寫權限 |
-| **系統工具存取** | 受 Snap 沙盒限制（例如無法在對話中呼叫 `/usr/bin/sudo`） | 與一般終端機環境相同，無額外沙盒阻擋 |
-| **更新方式** | 必須在主機終端機執行 `sudo snap refresh antigravity-cli` | 可直接在本地或**遠端對話中**執行 `agy update` 免密碼更新 |
-| **設定檔路徑** | `~/snap/antigravity-cli/common/.gemini/antigravity-cli` | `~/.gemini/antigravity-cli` |
+| **執行環境** | 運行於 Snap 嚴格沙盒（Strict Confinement）與獨立 Mount Namespace 中 | 原生運行於你的個人使用者（User）環境中 |
+| **自動背景更新** | **支援**（由系統 `snapd` 服務在背景自動檢查並更新） | **不支援自動背景更新**（需執行 `agy update` 觸發） |
+| **遠端在對話中更新** | **不可行**（沙盒禁止呼叫 `sudo`，且 `/snap` 為唯讀 SquashFS） | **完全支援**（在遠端對話中直接叫 Agent 執行 `agy update` 免密碼更新） |
+| **Agent 執行系統指令** | **受限**（無法使用 `sudo`、部分系統路徑與特殊硬體/Socket 被隔離） | **完全不受限**（你在終端機能跑的指令、Docker、系統管理，Agent 都能幫忙跑） |
+| **啟動速度與資源** | 首次啟動略慢，且佔用一個 Loop 掛載點（`/dev/loopX`） | 原生單一執行檔，啟動最快、零額外掛載開銷 |
+| **設定與資料路徑** | `~/snap/antigravity-cli/common/.gemini/antigravity-cli` | `~/.gemini/antigravity-cli`（官方標準路徑） |
+
+---
+
+### 2. Snap 版的優缺點
+
+- **優點**：
+  1. **系統級背景自動更新（免動手）**：Ubuntu / Xubuntu 的 `snapd` 預設每天會在背景自動更新套件，不需手動執行更新指令。
+  2. **版本回退（Rollback）容易**：若新版異常，Snap 會保留前一版映像檔，在主機執行 `sudo snap revert antigravity-cli` 即可一秒退回舊版。
+  3. **高安全性隔離（沙盒保護）**：受 AppArmor 與 Seccomp 沙盒保護，即使開啟自動允許權限，Agent 也無法透過 `sudo` 修改系統核心設定或存取未授權的系統目錄。
+- **缺點**：
+  1. **無法在 Antigravity 遠端對話中觸發更新**：`/snap` 為唯讀檔案系統，且沙盒內呼叫 `/usr/bin/sudo` 會直接被拒絕（`Permission denied`），必須另開 SSH 或回到電腦前才能手動更新。
+  2. **Agent 協助系統維護與開發時容易受限**：當請 Agent 安裝系統套件（`sudo apt install ...`）、重啟系統服務（`systemctl`）或操作受保護的開發環境時，會頻繁撞到 Snap 沙盒限制。
+  3. **設定檔路徑非標準**：資料路徑被重導向至 `~/snap/antigravity-cli/common/` 下，若要寫腳本或跨電腦同步 `~/.gemini/antigravity-cli`（如 Skills、Rules、MCP 設定），路徑與其他電腦不一致。
+
+---
+
+### 3. 官方獨立安裝版（`~/.local/bin/agy`）的優缺點
+
+- **優點**：
+  1. **完美的遠端自我更新（`agy update`）**：執行檔位於個人家目錄 `~/.local/bin/agy`，擁有完整寫入權限。隨時可在遠端對話中請 Agent 執行 `agy update` 直接完成更新，無須 `sudo` 密碼。
+  2. **完整的開發與系統控制能力**：無 Snap 沙盒阻擋，Agent 的終端機環境與原生 Terminal 完全一致，整合各種 CLI 工具、MCP Server、本地服務或系統腳本最順暢。
+  3. **標準化的設定檔路徑（`~/.gemini/antigravity-cli`）**：所有 Skills、Rules、Plugins 和 `settings.json` 皆位於官方標準路徑，方便對照官方文件或使用 Git 跨機同步。
+  4. **輕量、啟動快**：單一 Binary 直接執行，無 SquashFS 掛載開銷。
+- **缺點**：
+  1. **不會在背景自動更新**：除非自行設定 Cron Job，否則需手動或請 Agent 執行 `agy update` 升級。
+  2. **權限較大，需注意安全**：無 Snap 沙盒硬性隔離，Agent 擁有當前登入帳號的完整權限。
 
 > [!TIP]
-> 換成官方獨立版後，即使人在外面使用 Antigravity 遠端連線回家裡的 Xubuntu，也能隨時讓 Agent 直接執行 `agy update` 完成更新。
+> **總結建議**：如果你經常**遠端連線**使用這台 Xubuntu、希望能隨時從遠端更新 `agy`，或是會請 Antigravity 幫你設定開發環境、管理 Git / GitHub、配置自訂 Skills 與 MCP，強烈建議更換為 **官方獨立安裝版**。
 
 ---
 
