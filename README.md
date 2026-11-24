@@ -14,6 +14,7 @@
 | [🚀 Google Gemini 4 與 Decision 1 全解析報告](topics/google-gemini-4-and-decision-1-deep-dive.md) | AI 前沿與架構 | Gemini 4 化學元素命名、Hydrogen/Argon/Carbon 規格與非生成式 Decision 1 實戰架構 |
 | [🐧 Xubuntu 安裝與遷移 Antigravity CLI 完整筆記](topics/xubuntu-agy-installation-guide.md) | Linux 與開發環境 | 將 Snap 版 agy 遷移至官方獨立版、Remote Control vs Remote Agents 比較與排錯指南 |
 | [🛡️ Fortinet 鐵三角觀念轉換與實戰查修全集](topics/fortinet-security-fabric-guide.md) | 企業網路與資安 | CCNA 無痛銜接 FortiGate/FortiSwitch/FortiAP、FG-201F HA + 448E MCLAG 與 SSL VPN 排錯手冊 |
+| [🔗 FortiSwitch MCLAG 完整實戰手冊](topics/fortiswitch-mclag-architecture-setup-troubleshooting.md) | 企業網路與資安 | MCLAG/ICL/ICCP 核心原理、Two-Tier 從無到有建置 SOP、雙網卡伺服器接入與 5 大踩坑排解 |
 
 ---
 
