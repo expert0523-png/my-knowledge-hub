@@ -7,17 +7,19 @@ tags:
   - Antigravity
   - agy
   - RemoteControl
+  - RemoteAgents
   - 維運筆記
 aliases:
   - Xubuntu agy 安裝教學
   - Snap 遷移 Standalone agy
+  - Remote Control vs Remote Agents
 ---
 
 # 🐧 Xubuntu 安裝與遷移 Antigravity CLI (`agy`) 完整筆記
 
 > 本文檔已歸檔於知識庫 `topics/xubuntu-agy-installation-guide.md`，並永久同步於本地與雲端。
 
-這份筆記整理了在 **Xubuntu** 上將 `agy` 從 **Snap 版本**更換為 **官方獨立安裝版（Standalone Binary）** 的完整流程，以及未來的遠端連線與自我更新方式。
+這份筆記整理了在 **Xubuntu** 上將 `agy` 從 **Snap 版本**更換為 **官方獨立安裝版（Standalone Binary）** 的完整流程，以及 **Remote Control vs. Remote Agents** 完整比較、日常維護與常見問題排解。
 
 ---
 
@@ -63,9 +65,62 @@ aliases:
 > [!TIP]
 > **總結建議**：如果你經常**遠端連線**使用這台 Xubuntu、希望能隨時從遠端更新 `agy`，或是會請 Antigravity 幫你設定開發環境、管理 Git / GitHub、配置自訂 Skills 與 MCP，強烈建議更換為 **官方獨立安裝版**。
 
+### 4. 換成原生安裝版後，實際「多做到」哪些事？
+1. **遠端對話中一鍵自我更新**：不用開 SSH、不用輸入 `sudo`，隨時請 Agent 執行 `agy update` 即可升級。
+2. **完整呼叫系統工具與開發服務**：不再遇到 `/usr/bin/sudo: Permission denied`，也能順利操作 `apt`、`systemctl`、`Docker`（`/var/run/docker.sock`）或讀寫 `/mnt`、`/media`、`/opt` 等非家目錄路徑。
+3. **無縫沿用本機開發環境與憑證**：直接使用真正的 `$HOME`，自動讀取你原本的 `~/.ssh` 金鑰、`~/.gitconfig`、`gh` CLI 登入狀態，以及 `pyenv`、`conda`、`nvm` 等環境，推上 GitHub 不再卡關。
+4. **標準路徑跨機同步**：`~/.gemini/antigravity-cli` 與官方文件及其他作業系統一致，方便用 Git 同步自訂 Skills、Rules 與 MCP 設定。
+
 ---
 
-## 二、 完整遷移與安裝步驟（回家後在 Xubuntu 終端機執行）
+## 二、 Remote Control vs. Remote Agents 完整比較
+
+在 Google Antigravity 中，這兩個功能都能讓你從手機或瀏覽器遠端使用 Agent，但核心差異在於**「程式碼與 Agent 究竟跑在哪裡」**。
+
+```mermaid
+flowchart LR
+    User["使用者 (手機 / 瀏覽器 / 另一台電腦)"]
+    
+    subgraph RC["Remote Control (遠端控制)"]
+        LocalPC["家裡的 Xubuntu (本機電腦)<br/>執行 agy remote-control"]
+        LocalRes["本機硬碟 / GPU / Docker / SSH Key"]
+        LocalPC --- LocalRes
+    end
+
+    subgraph RA["Remote Agents (雲端遠端代理)"]
+        CloudVM["Google 託管雲端沙盒 (Linux VM)"]
+        CloudRes["GitHub Repo (OAuth) / Google Drive"]
+        CloudVM --- CloudRes
+    end
+
+    User -- "加密通道遙控本機" --> LocalPC
+    User -- "指派雲端背景任務" --> CloudVM
+```
+
+### 1. 詳細對照表
+
+| 比較項目 | Remote Control（遠端控制） | Remote Agents（雲端遠端代理） |
+| :--- | :--- | :--- |
+| **運算與執行位置** | **你的本機電腦**（如家裡的 Xubuntu） | **Google 託管的雲端沙盒**（獨立 Linux 虛擬機） |
+| **電腦是否需開機** | **必須開機且連網**（並啟動 `agy remote-control`） | **不需要**（關瀏覽器或電腦休眠，雲端仍會繼續跑完） |
+| **檔案與程式碼來源** | 直接讀寫**本機硬碟**的檔案、尚未 commit 的程式、本地資料庫 | 透過 OAuth 綁定 **GitHub Repository**、Google Drive 或直接上傳檔案 |
+| **開發環境與工具** | 使用**本機環境**（本地 GPU、Docker、外接硬碟、本地 Skills/MCP） | 使用 **Google 預設雲端 Linux 環境**（預裝 Python、Node.js 等，無法碰本機硬體） |
+| **交付成果方式** | 直接修改你本機硬碟上的檔案 | 在雲端修改並跑完測試後，直接 **Commit、Push 並開 Pull Request (PR)** 回 GitHub |
+| **帳號與方案限制** | 一般 Antigravity 桌面版與 CLI (`agy`) 皆可使用 | 需為個人帳號的 **Google AI Pro / Google AI Ultra** 訂閱方案 |
+
+### 2. 什麼時候該用哪一個？（搭配策略）
+- **使用 Remote Control 的時機**：
+  - 處理**還沒推上 GitHub 的本機專案**或大型資料檔。
+  - 需要用到家裡 Xubuntu 的**硬體資源**（GPU、Docker、本機服務）或遠端維護這台電腦。
+  - 想從同一介面管理多台自己的實體電腦。
+- **使用 Remote Agents 的時機**：
+  - **家裡電腦沒開機**，但在外面突然想修一個 GitHub 上的 Bug 或加新功能。
+  - 需要同時派出多個背景任務各自處理不同的 GitHub Issue，跑完後直接發 PR 讓你 Review。
+  - 想在完全乾淨隔離的雲端環境測試程式，不想弄亂本機系統。
+
+---
+
+## 三、 完整遷移與安裝步驟（回家後在 Xubuntu 終端機執行）
 
 ### 步驟 1：停止目前執行中的遠端服務並遷移設定檔
 Snap 版本將你的登入憑證、設定檔（`settings.json`）、自訂 Skills 與對話紀錄存放在 `~/snap/antigravity-cli/common/.gemini/antigravity-cli`。在移除 Snap 前，先將它們複製到標準路徑 `~/.gemini/antigravity-cli`，即可免去重新設定與重新登入的麻煩：
@@ -127,7 +182,7 @@ agy --version
 
 ---
 
-## 三、 日常維護、遠端連線與更新指令速查
+## 四、 日常維護、遠端連線與更新指令速查
 
 完成遷移後，未來在 Xubuntu 上的常用操作如下：
 
@@ -163,13 +218,32 @@ agy --remote-control
 > ```
 > （若在遠端對話中讓 Agent 執行重啟，連線會短暫重連一次，重連後即為最新版本。）
 
+### 3. 進階實用技巧：讓 Xubuntu 保持穩定待命
+- **防止電腦自動休眠斷線**：如果出門時希望隨時能連回家裡的 Xubuntu，記得在 Xubuntu 的「電源管理員（Power Manager）」中將「系統休眠（System sleep）」設為永不，以免電腦進入休眠導致 `remote-control` 斷線。
+- **開機自動啟動 `remote-control`（選用）**：若希望電腦重開機後自動恢復遠端連線待命，可以在 Xubuntu 的「工作階段與啟動（Session and Startup）」→「應用程式自動啟動」新增一筆指令：
+  ```bash
+  /home/<你的使用者名稱>/.local/bin/agy remote-control start
+  ```
+
 ---
 
-## 四、 重要檔案與目錄位置參考
+## 五、 常見問題排解（Troubleshooting）
+
+| 問題狀況 | 可能原因 | 解決方式 |
+| :--- | :--- | :--- |
+| 移除 Snap 後輸入 `agy` 顯示 `No such file or directory` | Bash 仍快取了舊的 `/snap/bin/agy` 路徑 | 執行 `hash -r && source ~/.bashrc`，或直接重開終端機視窗 |
+| `which agy` 找不到指令 | `~/.local/bin` 尚未加入 `PATH` | 執行 `~/.local/bin/agy install` 或在 `~/.bashrc` 加入 `export PATH="$HOME/.local/bin:$PATH"` |
+| 遷移後需要重新登入或找不到舊紀錄 | 忘記先複製 Snap 的設定目錄 | 若尚未刪除 Snap 備份，檢查 `~/snap/antigravity-cli/common/.gemini/antigravity-cli` 並複製至 `~/.gemini/` |
+| 在遠端無法連上這台 Xubuntu | `remote-control` 未啟動或電腦休眠 | 回到電腦執行 `agy remote-control status` 檢查狀態，必要時執行 `agy remote-control start` |
+
+---
+
+## 六、 重要檔案與目錄位置參考
 
 安裝完成後，所有相關檔案都會集中於你的個人家目錄下，方便管理與備份：
 
 - **執行檔位置**：`~/.local/bin/agy`
 - **全域設定檔**：`~/.gemini/antigravity-cli/settings.json`
-- **自訂 Skills / Rules / 對話紀錄**：`~/.gemini/antigravity-cli/`
+- **自訂 Skills 目錄**：`~/.gemini/antigravity-cli/skills/`（未來可在此建立 `update-to-github` 等自訂 Skill）
+- **自訂 Rules / 對話紀錄**：`~/.gemini/antigravity-cli/`
 - **預設暫存專案目錄（Scratch）**：`~/.gemini/antigravity-cli/scratch/`
